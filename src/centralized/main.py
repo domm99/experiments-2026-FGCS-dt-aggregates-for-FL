@@ -31,36 +31,42 @@ class GlucoseWindowDataset(Dataset):
         self,
         patient_series: list[PatientSeries],
         sequence_length: int,
+        prediction_horizon: int,
         split: str,
         stride: int,
     ) -> None:
         self.patient_series = patient_series
         self.sequence_length = sequence_length
+        self.prediction_horizon = prediction_horizon
         self.samples: list[tuple[int, int]] = []
 
         for patient_index, series in enumerate(patient_series):
             if split == "train":
-                start_target = sequence_length
-                end_target = series.train_end
+                start_input_end = sequence_length
+                end_input_end = series.train_end - prediction_horizon
             elif split == "val":
-                start_target = max(sequence_length, series.train_end)
-                end_target = series.val_end
+                start_input_end = max(sequence_length, series.train_end - prediction_horizon)
+                end_input_end = series.val_end - prediction_horizon
             elif split == "test":
-                start_target = max(sequence_length, series.val_end)
-                end_target = len(series.values)
+                start_input_end = max(sequence_length, series.val_end - prediction_horizon)
+                end_input_end = len(series.values) - prediction_horizon
             else:
                 raise ValueError(f"Unsupported split: {split}")
 
-            for target_idx in range(start_target, end_target, stride):
-                self.samples.append((patient_index, target_idx))
+            if end_input_end <= start_input_end:
+                continue
+
+            for input_end_idx in range(start_input_end, end_input_end, stride):
+                self.samples.append((patient_index, input_end_idx))
 
     def __len__(self) -> int:
         return len(self.samples)
 
     def __getitem__(self, index: int) -> tuple[torch.Tensor, torch.Tensor]:
-        patient_index, target_idx = self.samples[index]
+        patient_index, input_end_idx = self.samples[index]
         series = self.patient_series[patient_index].values
-        x = series[target_idx - self.sequence_length : target_idx].unsqueeze(-1)
+        target_idx = input_end_idx + self.prediction_horizon
+        x = series[input_end_idx - self.sequence_length : input_end_idx].unsqueeze(-1)
         y = series[target_idx]
         return x, y
 
@@ -89,6 +95,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--data-dir", type=Path, default=Path("T1DiabetesGranada/split"))
     parser.add_argument("--output-dir", type=Path, default=Path("artifacts/centralized"))
     parser.add_argument("--sequence-length", type=int, default=12)
+    parser.add_argument("--prediction-horizon", type=int, default=5)
     parser.add_argument("--stride", type=int, default=12)
     parser.add_argument("--train-ratio", type=float, default=0.70)
     parser.add_argument("--val-ratio", type=float, default=0.15)
@@ -101,6 +108,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--num-plot-series", type=int, default=5)
     parser.add_argument("--plot-windows-per-series", type=int, default=4)
     parser.add_argument("--plot-window-size", type=int, default=96)
+    parser.add_argument("--plot-window-hours", type=float, default=24.0)
     parser.add_argument("--seed", type=int, default=42)
     return parser.parse_args()
 
@@ -113,6 +121,7 @@ def set_seed(seed: int) -> None:
 def load_patient_series(
     data_dir: Path,
     sequence_length: int,
+    prediction_horizon: int,
     train_ratio: float,
     val_ratio: float,
 ) -> list[PatientSeries]:
@@ -126,16 +135,16 @@ def load_patient_series(
             errors="coerce",
         )
         df = df.dropna(subset=["timestamp", "Measurement"]).sort_values("timestamp")
-        if len(df) <= sequence_length + 2:
+        if len(df) <= sequence_length + prediction_horizon + 1:
             continue
 
         values = torch.tensor(df["Measurement"].astype(float).to_numpy(), dtype=torch.float32)
         n_total = len(values)
-        train_end = max(sequence_length + 1, int(n_total * train_ratio))
+        train_end = max(sequence_length + prediction_horizon + 1, int(n_total * train_ratio))
         val_end = max(train_end + 1, int(n_total * (train_ratio + val_ratio)))
-        val_end = min(val_end, n_total - 1)
+        val_end = min(val_end, n_total - prediction_horizon)
 
-        if val_end <= train_end or n_total - val_end < 1:
+        if val_end <= train_end or n_total - val_end <= prediction_horizon:
             continue
 
         patient_series.append(
@@ -179,12 +188,31 @@ def normalize_series(patient_series: list[PatientSeries], mean: float, std: floa
 def create_loaders(
     patient_series: list[PatientSeries],
     sequence_length: int,
+    prediction_horizon: int,
     stride: int,
     batch_size: int,
 ) -> tuple[DataLoader, DataLoader, DataLoader]:
-    train_dataset = GlucoseWindowDataset(patient_series, sequence_length, split="train", stride=stride)
-    val_dataset = GlucoseWindowDataset(patient_series, sequence_length, split="val", stride=stride)
-    test_dataset = GlucoseWindowDataset(patient_series, sequence_length, split="test", stride=stride)
+    train_dataset = GlucoseWindowDataset(
+        patient_series,
+        sequence_length,
+        prediction_horizon,
+        split="train",
+        stride=stride,
+    )
+    val_dataset = GlucoseWindowDataset(
+        patient_series,
+        sequence_length,
+        prediction_horizon,
+        split="val",
+        stride=stride,
+    )
+    test_dataset = GlucoseWindowDataset(
+        patient_series,
+        sequence_length,
+        prediction_horizon,
+        split="test",
+        stride=stride,
+    )
 
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
@@ -299,6 +327,7 @@ def predict_patient(
     model: nn.Module,
     series: PatientSeries,
     sequence_length: int,
+    prediction_horizon: int,
     start_idx: int,
     end_idx: int,
     device: torch.device,
@@ -309,8 +338,12 @@ def predict_patient(
     actuals = []
     timestamps = []
 
-    for target_idx in range(max(sequence_length, start_idx), end_idx):
-        x = series.values[target_idx - sequence_length : target_idx].unsqueeze(0).unsqueeze(-1).to(device)
+    start_input_end = max(sequence_length, start_idx - prediction_horizon)
+    end_input_end = end_idx - prediction_horizon
+
+    for input_end_idx in range(start_input_end, end_input_end):
+        target_idx = input_end_idx + prediction_horizon
+        x = series.values[input_end_idx - sequence_length : input_end_idx].unsqueeze(0).unsqueeze(-1).to(device)
         with torch.no_grad():
             pred = model(x).cpu().item()
         windows.append(pred * std + mean)
@@ -329,6 +362,7 @@ def collect_test_series_predictions(
     model: nn.Module,
     patient_series: list[PatientSeries],
     sequence_length: int,
+    prediction_horizon: int,
     device: torch.device,
     mean: float,
     std: float,
@@ -346,6 +380,7 @@ def collect_test_series_predictions(
                     model=model,
                     series=series,
                     sequence_length=sequence_length,
+                    prediction_horizon=prediction_horizon,
                     start_idx=series.val_end,
                     end_idx=len(series.values),
                     device=device,
@@ -380,6 +415,7 @@ def save_prediction_plots(
     output_dir: Path,
     windows_per_series: int,
     window_size: int,
+    window_hours: float,
 ) -> None:
     for item in predictions:
         timestamps = pd.to_datetime(item["timestamps"])
@@ -391,6 +427,12 @@ def save_prediction_plots(
             continue
 
         effective_window = min(window_size, total_points)
+        if len(timestamps) >= 2 and window_hours > 0:
+            median_step = timestamps.to_series().diff().dropna().median()
+            if pd.notna(median_step) and median_step.total_seconds() > 0:
+                inferred_window = max(1, int(round((window_hours * 3600) / median_step.total_seconds())))
+                effective_window = min(inferred_window, total_points)
+
         if total_points <= effective_window:
             start_positions = [0]
         else:
@@ -418,7 +460,7 @@ def save_prediction_plots(
             plt.ylabel("Glucose (mg/dL)")
             plt.title(
                 f"Test forecast for patient {patient_id} "
-                f"(window {window_index}/{len(start_positions)})"
+                f"(window {window_index}/{len(start_positions)}, ~{window_hours:g}h)"
             )
             plt.grid(True, alpha=0.3)
             plt.legend()
@@ -456,6 +498,7 @@ def main() -> None:
     patient_series_raw = load_patient_series(
         data_dir=args.data_dir,
         sequence_length=args.sequence_length,
+        prediction_horizon=args.prediction_horizon,
         train_ratio=args.train_ratio,
         val_ratio=args.val_ratio,
     )
@@ -465,6 +508,7 @@ def main() -> None:
     train_loader, val_loader, test_loader = create_loaders(
         patient_series=patient_series,
         sequence_length=args.sequence_length,
+        prediction_horizon=args.prediction_horizon,
         stride=args.stride,
         batch_size=args.batch_size,
     )
@@ -504,6 +548,7 @@ def main() -> None:
         model=model,
         patient_series=patient_series,
         sequence_length=args.sequence_length,
+        prediction_horizon=args.prediction_horizon,
         device=device,
         mean=mean,
         std=std,
@@ -515,6 +560,7 @@ def main() -> None:
         args.output_dir,
         windows_per_series=args.plot_windows_per_series,
         window_size=args.plot_window_size,
+        window_hours=args.plot_window_hours,
     )
     save_summary(args, history, test_metrics, mean, std, patient_series, args.output_dir)
     torch.save(model.state_dict(), args.output_dir / "model.pt")
