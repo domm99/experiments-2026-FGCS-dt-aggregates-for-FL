@@ -2,6 +2,7 @@ import math
 import torch
 import pandas as pd
 from torch import nn
+from src.distributed.DT import DT
 from collections import OrderedDict
 from src.distributed.LearningConfig import LearningConfig
 from src.distributed.utils import ForecastLSTM, PatientSeries, compute_train_stats, normalize_series, create_train_val_loaders, evaluate
@@ -14,12 +15,19 @@ class DTAggregate:
         self._config = config
         self._dts_data = {}
         self._seed = seed
+        self._active_dts = {}
 
     def notify_retraining_needed(self):
         pass
 
     def notify_new_data(self, dt_id: str, new_data: PatientSeries) -> None:
         self._dts_data[dt_id] = new_data
+
+    def register_active_dt(self, local_dt: DT, patient_id: str) -> None:
+        self._active_dts[patient_id] = local_dt
+
+    def unregister_active_dt(self, patient_id: str) -> None:
+        self._active_dts.pop(patient_id, None)
 
     @property
     def model(self) -> OrderedDict[str, torch.Tensor]:
