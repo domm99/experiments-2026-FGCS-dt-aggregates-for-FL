@@ -60,11 +60,11 @@ class DT:
 
     ## TODO - implement this shit
 
-    def inference(self):
+    def inference(self, current_time):
         pass
 
-    def test_loader_from_data(self):
+    def __test_loader_from_data(self):
         pass
 
-    def export_test_metrics(self):
+    def __export_test_metrics(self):
         pass

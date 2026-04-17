@@ -47,6 +47,7 @@ class Simulator:
             'PATIENT_BECOMES_ACTIVE': self.__handle_patient_becomes_active,
             'PATIENT_BECOMES_INACTIVE': self.__handle_patient_becomes_inactive,
             'TRAIN': self.__handle_train,
+            'INFERENCE': self.__handle_inference,
         }
         self._dt_aggregate = DTAggregate(config, seed)
 
@@ -99,3 +100,8 @@ class Simulator:
         self._dt_aggregate.update_data_from_dts(current_time)
         self._dt_aggregate.train(current_time)
         self._dt_aggregate.notify_new_model()
+
+    def __handle_inference(self, event: Event):
+        current_time = event.time
+        for local_dt in self._dt_aggregate.active_dts:
+            local_dt.inference(current_time)
