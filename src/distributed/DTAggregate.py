@@ -28,6 +28,10 @@ class DTAggregate:
         self._active_dts.pop(patient_id, None)
 
     @property
+    def active_dts(self) -> list[DT]:
+        return list(self._active_dts.values())
+
+    @property
     def model(self) -> OrderedDict[str, torch.Tensor]:
         return self._model.state_dict()
 
