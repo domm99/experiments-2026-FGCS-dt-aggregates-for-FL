@@ -42,14 +42,14 @@ if __name__ == "__main__":
             event_active = Event(
                 time = patient['min_time'],
                 priority = 0,
-                event_type = 'PATIENT_BECOME_ACTIVE',
+                event_type = 'PATIENT_BECOMES_ACTIVE',
                 payload = patient,
             )
 
             event_inactive = Event(
                 time=patient['max_time'],
                 priority=0,
-                event_type='PATIENT_BECOME_INACTIVE',
+                event_type='PATIENT_BECOMES_INACTIVE',
                 payload=patient,
             )
             simulator.schedule_event(event_active)
