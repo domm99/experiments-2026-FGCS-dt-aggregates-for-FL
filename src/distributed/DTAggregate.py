@@ -1,27 +1,40 @@
+import math
 import torch
-from src.common import ForecastLSTM
+from torch import nn
+
+from src.distributed.LearningConfig import LearningConfig
+from src.distributed.utils import ForecastLSTM, PatientSeries, compute_train_stats, normalize_series, create_train_val_loaders
 
 class DTAggregate:
 
-    def __init__(self, device: torch.device):
+    def __init__(self, config: LearningConfig):
         self._model = None
         self.epochs = 10
         self.learning_rate = 0.001 ## TODO fix this
-        self._data = None ## TODO set this
-        self.device = device
-
+        self._device = config.device
+        self._config = config
+        self._dts_data = {}
 
     def notify_retraining_needed(self):
         pass
 
-    def notify_new_data(self):
-        pass
+    def notify_new_data(self, dt_id: str, new_data: PatientSeries) -> None:
+        self._dts_data[dt_id] = new_data
 
     def train(self):
-        optimizer = torch.optim.Adam(model.parameters(), lr=self.learning_rate)
+        optimizer = torch.optim.Adam(self._model.parameters(), lr=self.learning_rate)
         self._model = ForecastLSTM(hidden_size = 64, num_layers = 1, dropout = 0.0)
         history: list[dict[str, float]] = []
-        train_loader = ... ## TODO define this
+        patients_series_raw = list(self._dts_data.values())
+        mean, std = compute_train_stats(patients_series_raw)
+        normalized_series = normalize_series(patients_series_raw, mean, std)
+        train_loader, val_loader = create_train_val_loaders(
+            patient_series = normalized_series,
+            sequence_length = self._config.sequence_length,
+            prediction_horizon = self._config.prediction_horizon,
+            stride = self._config.stride,
+            batch_size = self._config.batch_size,
+        )
 
         for epoch in range(1, self.epochs + 1):
             self._model.train()
@@ -30,24 +43,24 @@ class DTAggregate:
             train_sq_error_sum = 0.0
             total_samples = 0
             for x, y in train_loader:
-                x = x.to(self.device)
-                y = y.to(self.device)
+                x = x.to(self._device)
+                y = y.to(self._device)
 
                 optimizer.zero_grad()
-                preds = self._model(x) ## TODO check this warning
+                preds = self._model(x)
                 loss = nn.functional.mse_loss(preds, y)
                 loss.backward()
                 optimizer.step()
 
                 batch_size = y.size(0)
                 train_loss_sum += loss.item() * batch_size
-                preds_denorm = preds.detach().cpu() * std + mean ## TODO Understand what the fuck mean and std are
+                preds_denorm = preds.detach().cpu() * std + mean
                 y_denorm = y.detach().cpu() * std + mean
                 train_abs_error_sum += torch.abs(preds_denorm - y_denorm).sum().item()
                 train_sq_error_sum += ((preds_denorm - y_denorm) ** 2).sum().item()
                 total_samples += batch_size
 
-            val_metrics = evaluate(model, val_loader, device, mean, std)  ## TODO add evaluate
+            val_metrics = evaluate(self._model, val_loader, self._device, mean, std)  ## TODO add evaluate
 
             epoch_log = {
                 "epoch": epoch,
