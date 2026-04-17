@@ -34,6 +34,10 @@ class DTAggregate:
     def model(self) -> OrderedDict[str, torch.Tensor]:
         return self._model.state_dict()
 
+    def notify_new_model(self):
+        for dt in self._active_dts.values():
+            dt.model = self._model.state_dict()
+
     def train(self, current_time: pd.Timestamp) -> None:
         optimizer = torch.optim.Adam(self._model.parameters(), lr=self._config.learning_rate)
         self._model = ForecastLSTM(
