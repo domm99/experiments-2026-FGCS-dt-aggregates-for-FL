@@ -20,8 +20,9 @@ class DTAggregate:
     def notify_retraining_needed(self):
         pass
 
-    def notify_new_data(self, dt_id: str, new_data: PatientSeries) -> None:
-        self._dts_data[dt_id] = new_data
+    def update_data_from_dts(self, current_time: pd.Timestamp) -> None:
+        for dt_id, dt in self._active_dts.items():
+            self._dts_data[dt_id] = dt.get_data(current_time)
 
     def register_active_dt(self, local_dt: DT, patient_id: str) -> None:
         self._active_dts[patient_id] = local_dt

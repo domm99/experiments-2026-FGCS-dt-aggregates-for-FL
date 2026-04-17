@@ -55,9 +55,9 @@ class DT:
         )
         return series
 
-    def notify_data_to_dt_aggregate(self, current_time: pd.Timestamp) -> None:
+    def get_data(self, current_time: pd.Timestamp) -> PatientSeries:
         my_series = self.__get_patient_series(current_time)
-        self._dt_aggregate.notify_new_data(self._mid, my_series)
+        return my_series
 
     ## TODO - implement this shit
 
