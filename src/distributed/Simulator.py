@@ -86,20 +86,6 @@ class Simulator:
         self._dt_aggregate.register_active_dt(local_dt, patient_id)
         local_dt.model = self._dt_aggregate.model
 
-        first_forecast_time = self.forecast_policy.first_forecast_time(
-            patient_id=patient_id,
-            activation_time=current_time,
-            local_dt=local_dt,
-        ) ## TODO fix this porca madonna
-
-        if first_forecast_time is not None and first_forecast_time <= self._ending_time:
-            self.schedule_event(Event(
-                time=first_forecast_time,
-                priority=10,
-                event_type="LOCAL_FORECAST",
-                payload={"patient_id": patient_id}
-            ))
-
     def __handle_patient_becomes_inactive(self, event: Event):
         patient_id = event.payload['patient_id']
         dt = self._state.local_dts[patient_id]
