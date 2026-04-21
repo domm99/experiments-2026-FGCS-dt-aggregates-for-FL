@@ -1,7 +1,7 @@
 import pandas as pd
 from torch import nn
 from src.distributed.LearningConfig import LearningConfig
-from src.distributed.utils import load_patient_series, PatientSeries, ForecastLSTM
+from src.distributed.utils import load_patient_series, PatientSeries, ForecastLSTM, evaluate
 
 class DT:
 
@@ -9,6 +9,8 @@ class DT:
         self._mid = mid
         self._time = None
         self._model = None
+        self._last_std = 0.0
+        self._last_mean = 0.0
         self._config = config
         self._is_active = False
         self._dt_aggregate = None
@@ -26,7 +28,8 @@ class DT:
         return self._model
 
     @model.setter
-    def model(self, model: nn.Module):
+    def model(self, data: tuple[nn.Module, float, float]):
+        model, mean, std = data
         fresh_model = ForecastLSTM(
             hidden_size=self._config.hidden_size,
             num_layers=self._config.layers,
@@ -34,6 +37,8 @@ class DT:
         )
         fresh_model.load_state_dict(model.state_dict())
         self._model = fresh_model
+        self._last_mean = mean
+        self._last_std = std
 
     @property
     def dt_aggregate(self):
@@ -43,8 +48,14 @@ class DT:
     def dt_aggregate(self, dt):
         self._dt_aggregate = dt
 
-    def __get_patient_series(self, current_time: pd.Timestamp) -> PatientSeries:
-        filtered_df = self._data[self._data['timestamp'] <= current_time]
+    def __get_patient_series(self, current_time: pd.Timestamp, last_train_time: pd.Timestamp = None) -> PatientSeries:
+        if last_train_time is None:
+            filtered_df = self._data[self._data['timestamp'] <= current_time]
+        else:
+            filtered_df = self._data[
+                (self._data['timestamp'] >= last_train_time) &
+                (self._data['timestamp'] <= current_time)
+            ]
         series = load_patient_series(
             patient_id=self._mid,
             patient_dataframe=filtered_df,
@@ -58,13 +69,21 @@ class DT:
         my_series = self.__get_patient_series(current_time)
         return my_series
 
-    ## TODO - implement this shit
+    def inference(self, current_time: pd.Timestamp, last_training_time: pd.Timestamp) -> pd.DataFrame:
+        loader = self.__test_loader_from_data(current_time, last_training_time)
+        metrics = evaluate(self._model, loader, self._config.device, self._last_mean, self._last_std)
+        self.__export_test_metrics(metrics, current_time)
 
-    def inference(self, current_time):
-        pass
+    def __test_loader_from_data(self, current_time: pd.Timestamp, last_training_time: pd.Timestamp):
+        series = self.__get_patient_series(current_time, last_training_time)
+        loader = create_test_loaders(
+            series,
+            self._config.sequence_length,
+            self._config.prediction_horizon,
+            self._config.stride,
+            self._config.batch_size)
+        return loader
 
-    def __test_loader_from_data(self):
-        pass
-
-    def __export_test_metrics(self):
-        pass
+    def __export_test_metrics(self, metrics: dict, current_time: pd.Timestamp):
+        metrics_df = pd.DataFrame([metrics])
+        metrics_df.to_csv(f'{self._config.data_export_path}/test_{current_time}-DT_{self._mid}-seed_{self._seed}.csv', index=False)

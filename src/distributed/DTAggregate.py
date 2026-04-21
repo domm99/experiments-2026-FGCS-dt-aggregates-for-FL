@@ -16,6 +16,8 @@ class DTAggregate:
         self._dts_data = {}
         self._seed = seed
         self._active_dts = {}
+        self._last_mean = 0.0
+        self._last_std = 0.0
 
     def update_data_from_dts(self, current_time: pd.Timestamp) -> None:
         for dt_id, dt in self._active_dts.items():
@@ -37,7 +39,7 @@ class DTAggregate:
 
     def notify_new_model(self):
         for dt in self._active_dts.values():
-            dt.model = self._model.state_dict()
+            dt.model = (self._model.state_dict(), self._last_mean, self._last_std)
 
     def train(self, current_time: pd.Timestamp) -> None:
         optimizer = torch.optim.Adam(self._model.parameters(), lr=self._config.learning_rate)
@@ -103,5 +105,6 @@ class DTAggregate:
 
         metrics_df = pd.DataFrame(history)
         metrics_df.to_csv(f'{self._config.data_export_path}/training_{current_time}-seed_{self._seed}.csv', index=False)
-
+        self._last_mean = mean
+        self._last_std = std
 

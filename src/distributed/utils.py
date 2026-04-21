@@ -177,9 +177,24 @@ def create_train_val_loaders(
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
     return train_loader, val_loader
 
+def create_test_loaders(
+    patient_series: list[PatientSeries],
+    sequence_length: int,
+    prediction_horizon: int,
+    stride: int,
+    batch_size: int,
+) -> DataLoader:
+    test_dataset = GlucoseWindowDataset(
+        patient_series,
+        sequence_length,
+        prediction_horizon,
+        split="test",
+        stride=stride,
+    )
+    return DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
+
 def mae(predictions: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
     return torch.mean(torch.abs(predictions - targets))
-
 
 def rmse(predictions: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
     return torch.sqrt(torch.mean((predictions - targets) ** 2))
