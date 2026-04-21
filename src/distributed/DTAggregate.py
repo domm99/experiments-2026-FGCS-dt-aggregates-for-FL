@@ -42,12 +42,12 @@ class DTAggregate:
             dt.model = (self._model.state_dict(), self._last_mean, self._last_std)
 
     def train(self, current_time: pd.Timestamp) -> None:
-        optimizer = torch.optim.Adam(self._model.parameters(), lr=self._config.learning_rate)
         self._model = ForecastLSTM(
             hidden_size = self._config.hidden_size,
             num_layers = self._config.layers,
             dropout = self._config.dropout,
         )
+        optimizer = torch.optim.Adam(self._model.parameters(), lr=self._config.learning_rate)
         history: list[dict[str, float]] = []
         patients_series_raw = list(self._dts_data.values())
         mean, std = compute_train_stats(patients_series_raw)
