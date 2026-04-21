@@ -41,7 +41,7 @@ def schedule_trainings(experiment, simulator, min_time):
                 time=min_time + pd.DateOffset(years=(i+1)) - pd.DateOffset(days=1),
                 priority=2,
                 event_type='INFERENCE',
-                payload={'last_training_time': min_time + pd.DateOffset(years=(i-1))},
+                payload={'last_training_time': min_time + pd.DateOffset(years=i)},
             )
             simulator.schedule_event(test_event)
 
