@@ -14,7 +14,7 @@ class DT:
         self._config = config
         self._is_active = False
         self._dt_aggregate = None
-        self._data = pd.read_csv(f'{data_path}/{mid}.csv')
+        self._data = self.__upload_data(data_path, mid)
 
     def activate(self, current_time: pd.Timestamp):
         self._is_active = True
@@ -73,6 +73,13 @@ class DT:
         loader = self.__test_loader_from_data(current_time, last_training_time)
         metrics = evaluate(self._model, loader, self._config.device, self._last_mean, self._last_std)
         self.__export_test_metrics(metrics, current_time)
+
+    def __upload_data(self, data_path: str, mid: str) -> pd.DataFrame:
+        data = pd.read_csv(f'{data_path}/{mid}.csv')
+        data['timestamp'] = pd.to_datetime(
+            data['Measurement_date'] + ' ' + data['Measurement_time']
+        )
+        return data
 
     def __test_loader_from_data(self, current_time: pd.Timestamp, last_training_time: pd.Timestamp):
         series = self.__get_patient_series(current_time, last_training_time)
