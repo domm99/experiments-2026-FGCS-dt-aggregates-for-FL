@@ -19,7 +19,7 @@ class GlucoseWindowDataset(Dataset):
 
     def __init__(
         self,
-        patient_series: list[PatientSeries],
+        patient_series: list[PatientSeries] | PatientSeries,
         sequence_length: int,
         prediction_horizon: int,
         split: str,
@@ -37,9 +37,9 @@ class GlucoseWindowDataset(Dataset):
             elif split == "val":
                 start_input_end = max(sequence_length, series.train_end - prediction_horizon)
                 end_input_end = series.val_end - prediction_horizon
-            elif split == "test":
-                start_input_end = max(sequence_length, series.val_end - prediction_horizon)
-                end_input_end = len(series.values) - prediction_horizon
+            #elif split == "test":
+            #    start_input_end = max(sequence_length, series.val_end - prediction_horizon)
+            #    end_input_end = len(series.values) - prediction_horizon
             else:
                 raise ValueError(f"Unsupported split: {split}")
 
@@ -179,7 +179,7 @@ def create_train_val_loaders(
     return train_loader, val_loader
 
 def create_test_loaders(
-    patient_series: list[PatientSeries],
+    patient_series: PatientSeries,
     sequence_length: int,
     prediction_horizon: int,
     stride: int,
