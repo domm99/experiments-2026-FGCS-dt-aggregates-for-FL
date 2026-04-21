@@ -25,21 +25,26 @@ class GlucoseWindowDataset(Dataset):
         split: str,
         stride: int,
     ) -> None:
-        self.patient_series = patient_series
+        if isinstance(patient_series, PatientSeries):
+            self.patient_series = [patient_series]
+        else:
+            self.patient_series = patient_series
         self.sequence_length = sequence_length
         self.prediction_horizon = prediction_horizon
         self.samples: list[tuple[int, int]] = []
 
-        for patient_index, series in enumerate(patient_series):
+        for patient_index, series in enumerate(self.patient_series):
             if split == "train":
                 start_input_end = sequence_length
                 end_input_end = series.train_end - prediction_horizon
             elif split == "val":
                 start_input_end = max(sequence_length, series.train_end - prediction_horizon)
                 end_input_end = series.val_end - prediction_horizon
-            #elif split == "test":
-            #    start_input_end = max(sequence_length, series.val_end - prediction_horizon)
-            #    end_input_end = len(series.values) - prediction_horizon
+            elif split == "test":
+                # At inference time the local DT receives only the interval that
+                # must be evaluated, so the whole series is treated as test.
+                start_input_end = sequence_length
+                end_input_end = len(series.values) - prediction_horizon
             else:
                 raise ValueError(f"Unsupported split: {split}")
 
@@ -179,7 +184,7 @@ def create_train_val_loaders(
     return train_loader, val_loader
 
 def create_test_loaders(
-    patient_series: PatientSeries,
+    patient_series: list[PatientSeries] | PatientSeries,
     sequence_length: int,
     prediction_horizon: int,
     stride: int,
