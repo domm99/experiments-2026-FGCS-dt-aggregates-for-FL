@@ -1,5 +1,6 @@
 import glob
 import pandas as pd
+from pathlib import Path
 from src.distributed.Simulator import Simulator, Event
 from src.distributed.utils import seed_everything
 from src.distributed.LearningConfig import LearningConfig
@@ -49,6 +50,7 @@ if __name__ == "__main__":
 
     config = LearningConfig()
     data_folder = 'T1DiabetesGranada/split'
+    Path(config.data_export_path).mkdir(parents=True, exist_ok=True)
     seeds = [0]
     experiments = ['RetrainAfterTime'] # TODO add all the experiments
 
