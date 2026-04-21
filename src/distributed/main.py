@@ -1,8 +1,9 @@
 import glob
 import pandas as pd
 from pathlib import Path
-from src.distributed.Simulator import Simulator, Event
+from codecarbon import track_emissions
 from src.distributed.utils import seed_everything
+from src.distributed.Simulator import Simulator, Event
 from src.distributed.LearningConfig import LearningConfig
 
 def load_patients(data_folder: str) -> tuple[list[dict], pd.Timestamp, pd.Timestamp]:
@@ -46,6 +47,39 @@ def schedule_trainings(experiment: str, simulator: Simulator, min_time: pd.Times
             )
             simulator.schedule_event(test_event)
 
+@track_emissions
+def run_simulation(seed: int, experiment: str) -> None:
+    seed_everything(seed)
+    all_patients, min_time, max_time = load_patients(data_folder)
+
+    print(f'Found {len(all_patients)} patients')
+    print(f'Min: {min_time}, Max: {max_time}')
+
+    simulator = Simulator(data_folder, min_time, max_time, config, seed)
+
+    # Schedule patients activation and deactivation
+    for patient in all_patients:
+        event_active = Event(
+            time=patient['min_time'],
+            priority=0,
+            event_type='PATIENT_BECOMES_ACTIVE',
+            payload=patient,
+        )
+
+        event_inactive = Event(
+            time=patient['max_time'],
+            priority=0,
+            event_type='PATIENT_BECOMES_INACTIVE',
+            payload=patient,
+        )
+        simulator.schedule_event(event_active)
+        simulator.schedule_event(event_inactive)
+
+    # Schedule trainings and inferences
+    schedule_trainings(experiment, simulator, min_time)
+
+    simulator.start()
+
 if __name__ == "__main__":
 
     config = LearningConfig()
@@ -56,34 +90,4 @@ if __name__ == "__main__":
 
     for experiment in experiments:
         for seed in seeds:
-
-            seed_everything(seed)
-            all_patients, min_time, max_time = load_patients(data_folder)
-
-            print(f'Found {len(all_patients)} patients')
-            print(f'Min: {min_time}, Max: {max_time}')
-
-            simulator = Simulator(data_folder, min_time, max_time, config, seed)
-
-            # Schedule patients activation and deactivation
-            for patient in all_patients:
-                event_active = Event(
-                    time = patient['min_time'],
-                    priority = 0,
-                    event_type = 'PATIENT_BECOMES_ACTIVE',
-                    payload = patient,
-                )
-
-                event_inactive = Event(
-                    time=patient['max_time'],
-                    priority=0,
-                    event_type='PATIENT_BECOMES_INACTIVE',
-                    payload=patient,
-                )
-                simulator.schedule_event(event_active)
-                simulator.schedule_event(event_inactive)
-
-            # Schedule trainings and inferences
-            schedule_trainings(experiment, simulator, min_time)
-
-            simulator.start()
+            run_simulation(seed, experiment)
