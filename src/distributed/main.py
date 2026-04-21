@@ -27,7 +27,7 @@ def load_patients(data_folder: str) -> tuple[list[dict], pd.Timestamp, pd.Timest
                 global_max = max_time
     return patients, global_min, global_max
 
-def schedule_trainings(experiment, simulator, min_time):
+def schedule_trainings(experiment: str, simulator: Simulator, min_time: pd.Timestamp) -> None:
     if experiment == 'RetrainAfterTime':
         for i in range(1, 4):
             train_event = Event(
