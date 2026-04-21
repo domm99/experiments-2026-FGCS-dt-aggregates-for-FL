@@ -16,6 +16,7 @@ class PatientSeries:
 
 
 class GlucoseWindowDataset(Dataset):
+
     def __init__(
         self,
         patient_series: list[PatientSeries],
@@ -36,7 +37,7 @@ class GlucoseWindowDataset(Dataset):
             elif split == "val":
                 start_input_end = max(sequence_length, series.train_end - prediction_horizon)
                 end_input_end = series.val_end - prediction_horizon
-            elif split == "test": ## TODO fix this for testing
+            elif split == "test":
                 start_input_end = max(sequence_length, series.val_end - prediction_horizon)
                 end_input_end = len(series.values) - prediction_horizon
             else:
