@@ -50,7 +50,7 @@ class DTAggregate:
             hidden_size = self._config.hidden_size,
             num_layers = self._config.layers,
             dropout = self._config.dropout,
-        )
+        ).to(self._config.device)
         optimizer = torch.optim.Adam(self._model.parameters(), lr=self._config.learning_rate)
         history: list[dict[str, float]] = []
         patients_series_raw = list(self._dts_data.values())
