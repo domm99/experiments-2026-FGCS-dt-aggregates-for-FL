@@ -1,4 +1,5 @@
 import heapq
+from abc import ABC
 import pandas as pd
 from src.distributed.DT import DT
 from dataclasses import dataclass, field
@@ -31,6 +32,21 @@ class SimulationState:
         self.active_patients = set()
         self.local_dts = {}
 
+class Monitor(ABC):
+
+    def __init__(self, simulator):
+        self._simulator = simulator
+        self._simulator.add_monitor(self)
+
+    def on_start(self) -> None:
+        """Called when the simulation starts"""
+
+    def on_finish(self) -> None:
+        """Called when the simulation ends"""
+
+    def update(self):
+        """Called at each simulation step"""
+
 class Simulator:
 
     def __init__(self, data_folder: str, starting_time: pd.Timestamp, ending_time: pd.Timestamp, config: LearningConfig, seed: int):
@@ -48,17 +64,31 @@ class Simulator:
             'INFERENCE': self.__handle_inference,
         }
         self._dt_aggregate = DTAggregate(config, seed)
+        self._monitors = []
 
     def schedule_event(self, event: Event) -> None:
         self._queue.push(event)
+
+    def add_monitor(self, monitor) -> None:
+        self._monitors.append(monitor)
 
     def __dispatch(self, event: Event):
         self._handlers[event.event_type](event)
 
     def start(self):
+
+        for monitor in self._monitors:
+            monitor.on_start()
+
         while not self._queue.empty():
             event = self._queue.pop()
             self.__dispatch(event)
+
+            for monitor in self._monitors:
+                monitor.update()
+
+        for monitor in self._monitors:
+            monitor.on_finish()
 
     def __handle_patient_becomes_active(self, event: Event):
         patient_id = event.payload['patient_id']
