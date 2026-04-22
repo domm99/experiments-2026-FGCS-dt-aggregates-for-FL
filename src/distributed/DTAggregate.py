@@ -8,7 +8,7 @@ from src.distributed.utils import ForecastLSTM, compute_train_stats, normalize_s
 
 class DTAggregate:
 
-    def __init__(self, config: LearningConfig, seed: int):
+    def __init__(self, config: LearningConfig, experiment: str, seed: int):
         self._model = ForecastLSTM(
             hidden_size = config.hidden_size,
             num_layers = config.layers,
@@ -21,6 +21,7 @@ class DTAggregate:
         self._active_dts = {}
         self._last_mean = 0.0
         self._last_std = 0.0
+        self._experiment = experiment
 
     def update_data_from_dts(self, current_time: pd.Timestamp) -> None:
         for dt_id, dt in self._active_dts.items():
@@ -111,7 +112,7 @@ class DTAggregate:
             )
 
         metrics_df = pd.DataFrame(history)
-        metrics_df.to_csv(f'{self._config.data_export_path}/training_{current_time}-seed_{self._seed}.csv', index=False)
+        metrics_df.to_csv(f'{self._config.data_export_path}/{self._experiment}/training_{current_time}-seed_{self._seed}.csv', index=False)
         self._last_mean = mean
         self._last_std = std
 

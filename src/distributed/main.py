@@ -5,6 +5,7 @@ from codecarbon import track_emissions
 from src.distributed.utils import seed_everything
 from src.distributed.Simulator import Simulator, Event
 from src.distributed.LearningConfig import LearningConfig
+from src.distributed.Monitors import ActivationPatientsMonitor
 
 def load_patients(data_folder: str) -> tuple[list[dict], pd.Timestamp, pd.Timestamp]:
     patients = []
@@ -46,8 +47,13 @@ def schedule_trainings(experiment: str, simulator: Simulator, min_time: pd.Times
                 payload={'last_training_time': min_time + pd.DateOffset(years=i)},
             )
             simulator.schedule_event(test_event)
+    elif experiment == 'RetrainEachNDTsActivated':
+        ActivationPatientsMonitor(
+            simulator=simulator,
+            activation_threshold=50,
+        )
 
-@track_emissions
+#@track_emissions
 def run_simulation(seed: int, experiment: str) -> None:
     seed_everything(seed)
     all_patients, min_time, max_time = load_patients(data_folder)
@@ -55,7 +61,7 @@ def run_simulation(seed: int, experiment: str) -> None:
     print(f'Found {len(all_patients)} patients')
     print(f'Min: {min_time}, Max: {max_time}')
 
-    simulator = Simulator(data_folder, min_time, max_time, config, seed)
+    simulator = Simulator(data_folder, experiment, min_time, max_time, config, seed)
 
     # Schedule patients activation and deactivation
     for patient in all_patients:
@@ -84,10 +90,10 @@ if __name__ == "__main__":
 
     config = LearningConfig()
     data_folder = 'T1DiabetesGranada/split'
-    Path(config.data_export_path).mkdir(parents=True, exist_ok=True)
     seeds = [0]
-    experiments = ['RetrainAfterTime'] # TODO add all the experiments
+    experiments = ['RetrainEachNDTsActivated', 'RetrainAfterTime'] # TODO add all the experiments
 
     for experiment in experiments:
+        Path(f'{config.data_export_path}/{experiment}').mkdir(parents=True, exist_ok=True)
         for seed in seeds:
             run_simulation(seed, experiment)

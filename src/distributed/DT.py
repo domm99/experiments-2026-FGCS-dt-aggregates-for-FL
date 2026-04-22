@@ -7,7 +7,7 @@ from src.distributed.utils import load_patient_series, load_test_patient_series,
 
 class DT:
 
-    def __init__(self, mid: str, data_path: str, config: LearningConfig, seed: int):
+    def __init__(self, mid: str, data_path: str, experiment: str, config: LearningConfig, seed: int):
         self._mid = mid
         self._time = None
         self._seed = seed
@@ -17,6 +17,7 @@ class DT:
         self._config = config
         self._is_active = False
         self._dt_aggregate = None
+        self._experiment = experiment
         self._data = self.__upload_data(data_path, mid)
 
     def activate(self, current_time: pd.Timestamp):
@@ -127,4 +128,4 @@ class DT:
         else:
             metrics_df = pd.read_csv(files[0])
             metrics_df = pd.concat([metrics_df, pd.DataFrame([metrics])], ignore_index=True)
-        metrics_df.to_csv(f'{self._config.data_export_path}/test_{current_time}-seed_{self._seed}.csv', index=False)
+        metrics_df.to_csv(f'{self._config.data_export_path}/{self._experiment}/test_{current_time}-seed_{self._seed}.csv', index=False)

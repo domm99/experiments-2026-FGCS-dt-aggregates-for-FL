@@ -49,7 +49,7 @@ class Monitor(ABC):
 
 class Simulator:
 
-    def __init__(self, data_folder: str, starting_time: pd.Timestamp, ending_time: pd.Timestamp, config: LearningConfig, seed: int):
+    def __init__(self, data_folder: str, experiment: str, starting_time: pd.Timestamp, ending_time: pd.Timestamp, config: LearningConfig, seed: int):
         self._queue = EventQueue()
         self.data_folder = data_folder
         self.seed = seed
@@ -63,8 +63,9 @@ class Simulator:
             'TRAIN': self.__handle_train,
             'INFERENCE': self.__handle_inference,
         }
-        self._dt_aggregate = DTAggregate(config, seed)
+        self._dt_aggregate = DTAggregate(config, experiment, seed)
         self._monitors = []
+        self._experiment = experiment
 
     def schedule_event(self, event: Event) -> None:
         self._queue.push(event)
@@ -82,6 +83,7 @@ class Simulator:
 
         while not self._queue.empty():
             event = self._queue.pop()
+            self.time = event.time
             self.__dispatch(event)
 
             for monitor in self._monitors:
@@ -100,7 +102,7 @@ class Simulator:
             return
 
         if patient_id not in self._state.local_dts:
-            self._state.local_dts[patient_id] = DT(patient_id, self.data_folder, self._config, self.seed)
+            self._state.local_dts[patient_id] = DT(patient_id, self.data_folder, self._experiment, self._config, self.seed)
 
         local_dt = self._state.local_dts[patient_id]
         local_dt.activate(current_time)
