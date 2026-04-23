@@ -2,41 +2,41 @@ import pandas as pd
 from src.distributed.Simulator import Event, Monitor, Simulator
 
 
-class ActivationPatientsMonitor(Monitor):
-
-    def __init__(
-        self,
-        simulator: Simulator,
-        activation_threshold: int,
-        train_priority: int = 1,
-    ) -> None:
-        super().__init__(simulator)
-        self._activation_threshold = activation_threshold
-        self._train_priority = train_priority
-        self._activations_since_last_training = 0
-        self._training_pending = False
-
-    def on_event(self, event: Event) -> None:
-        if event.event_type == 'PATIENT_BECOMES_ACTIVE':
-            self._activations_since_last_training += 1
-            if self._training_pending:
-                return
-            if self._activations_since_last_training < self._activation_threshold:
-                return
-            self._training_pending = True
-            self._simulator.schedule_event(
-                Event(
-                    time=event.time,
-                    priority=self._train_priority,
-                    event_type='TRAIN',
-                    payload={'reason': 'activation_threshold'},
-                )
-            )
-            return
-
-        if event.event_type == 'TRAIN':
-            self._activations_since_last_training = 0
-            self._training_pending = False
+# class ActivationPatientsMonitor(Monitor):
+#
+#     def __init__(
+#         self,
+#         simulator: Simulator,
+#         activation_threshold: int,
+#         train_priority: int = 1,
+#     ) -> None:
+#         super().__init__(simulator)
+#         self._activation_threshold = activation_threshold
+#         self._train_priority = train_priority
+#         self._activations_since_last_training = 0
+#         self._training_pending = False
+#
+#     def on_event(self, event: Event) -> None:
+#         if event.event_type == 'PATIENT_BECOMES_ACTIVE':
+#             self._activations_since_last_training += 1
+#             if self._training_pending:
+#                 return
+#             if self._activations_since_last_training < self._activation_threshold:
+#                 return
+#             self._training_pending = True
+#             self._simulator.schedule_event(
+#                 Event(
+#                     time=event.time,
+#                     priority=self._train_priority,
+#                     event_type='TRAIN',
+#                     payload={'reason': 'activation_threshold'},
+#                 )
+#             )
+#             return
+#
+#         if event.event_type == 'TRAIN':
+#             self._activations_since_last_training = 0
+#             self._training_pending = False
 
 
 class PerformanceDriftMonitor(Monitor):
