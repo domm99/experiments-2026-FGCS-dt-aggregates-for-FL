@@ -49,9 +49,6 @@ class Monitor(ABC):
     def on_event(self, event: Event) -> None:
         """Called after an event has been processed"""
 
-    def update(self):
-        """Called at each simulation step"""
-
 class Simulator:
 
     def __init__(self, data_folder: str, experiment: str, starting_time: pd.Timestamp, ending_time: pd.Timestamp, config: LearningConfig, seed: int):
@@ -111,7 +108,6 @@ class Simulator:
 
             for monitor in self._monitors:
                 monitor.on_event(event)
-                monitor.update()
 
         for monitor in self._monitors:
             monitor.on_finish()

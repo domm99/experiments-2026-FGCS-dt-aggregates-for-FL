@@ -176,7 +176,7 @@ class ActivationPatientsMonitor(Monitor):
         self._is_first_train = True
         self._last_training_time = None
 
-    def update(self):
+    def on_event(self, event: Event):
         active_dts = len(self._simulator._state.active_patients)
         delta = active_dts - self._last_active_dts
         self._last_active_dts = active_dts
