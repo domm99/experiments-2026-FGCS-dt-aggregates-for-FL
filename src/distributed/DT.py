@@ -75,24 +75,33 @@ class DT:
         my_series = self.__get_patient_series(current_time)
         return my_series
 
-    def inference(self, current_time: pd.Timestamp, last_training_time: pd.Timestamp) -> pd.DataFrame:
+    def inference(self, current_time: pd.Timestamp, last_training_time: pd.Timestamp) -> dict:
+        if self._model is None:
+            metrics = {
+                'status': 'skipped_no_model',
+                'num_points': 0,
+                'mse': float('nan'),
+                'mae': float('nan'),
+                'rmse': float('nan'),
+            }
+            self.__export_test_metrics(metrics, current_time)
+            return metrics
         loader, num_points = self.__test_loader_from_data(current_time, last_training_time)
         if loader is None:
-            self.__export_test_metrics(
-                {
-                    'status': 'skipped_short_test_window',
-                    'num_points': num_points,
-                    'mse': float('nan'),
-                    'mae': float('nan'),
-                    'rmse': float('nan'),
-                },
-                current_time,
-            )
-            return
+            metrics = {
+                'status': 'skipped_short_test_window',
+                'num_points': num_points,
+                'mse': float('nan'),
+                'mae': float('nan'),
+                'rmse': float('nan'),
+            }
+            self.__export_test_metrics(metrics, current_time)
+            return metrics
         metrics = evaluate(self._model, loader, self._config.device, self._last_mean, self._last_std)
         metrics['status'] = 'evaluated'
         metrics['num_points'] = num_points
         self.__export_test_metrics(metrics, current_time)
+        return metrics
 
     def __upload_data(self, data_path: str, mid: str) -> pd.DataFrame:
         data = pd.read_csv(f'{data_path}/{mid}.csv')
@@ -121,11 +130,12 @@ class DT:
         return loader, len(series.values)
 
     def __export_test_metrics(self, metrics: dict, current_time: pd.Timestamp):
-        files = glob.glob(f'{self._config.data_export_path}/*{current_time}*.csv')
         metrics['dt_id'] = self._mid
+        output_path = f'{self._config.data_export_path}/{self._experiment}/test_{current_time}-seed_{self._seed}.csv'
+        files = glob.glob(output_path)
         if len(files) == 0:
             metrics_df = pd.DataFrame([metrics])
         else:
-            metrics_df = pd.read_csv(files[0])
+            metrics_df = pd.read_csv(output_path)
             metrics_df = pd.concat([metrics_df, pd.DataFrame([metrics])], ignore_index=True)
-        metrics_df.to_csv(f'{self._config.data_export_path}/{self._experiment}/test_{current_time}-seed_{self._seed}.csv', index=False)
+        metrics_df.to_csv(output_path, index=False)

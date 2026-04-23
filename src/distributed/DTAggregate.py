@@ -24,8 +24,12 @@ class DTAggregate:
         self._experiment = experiment
 
     def update_data_from_dts(self, current_time: pd.Timestamp) -> None:
+        self._dts_data = {}
         for dt_id, dt in self._active_dts.items():
-            self._dts_data[dt_id] = dt.get_data(current_time)
+            try:
+                self._dts_data[dt_id] = dt.get_data(current_time)
+            except Exception as exc:
+                print(f'Skipping DT {dt_id} during training: {exc}')
 
     def register_active_dt(self, local_dt: DT, patient_id: str) -> None:
         self._active_dts[patient_id] = local_dt
@@ -36,6 +40,10 @@ class DTAggregate:
     @property
     def active_dts(self) -> list[DT]:
         return list(self._active_dts.values())
+
+    @property
+    def trainable_dt_count(self) -> int:
+        return len(self._dts_data)
 
     @property
     def model(self) -> dict[str, torch.Tensor]:
@@ -115,4 +123,3 @@ class DTAggregate:
         metrics_df.to_csv(f'{self._config.data_export_path}/{self._experiment}/training_{current_time}-seed_{self._seed}.csv', index=False)
         self._last_mean = mean
         self._last_std = std
-

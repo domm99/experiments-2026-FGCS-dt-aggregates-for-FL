@@ -5,7 +5,7 @@ from codecarbon import track_emissions
 from src.distributed.utils import seed_everything
 from src.distributed.Simulator import Simulator, Event
 from src.distributed.LearningConfig import LearningConfig
-from src.distributed.Monitors import ActivationPatientsMonitor
+from src.distributed.Monitors import ActivationPatientsMonitor, PerformanceDriftMonitor
 
 def load_patients(data_folder: str) -> tuple[list[dict], pd.Timestamp, pd.Timestamp]:
     patients = []
@@ -35,7 +35,7 @@ def schedule_trainings(experiment: str, simulator: Simulator, min_time: pd.Times
         for i in range(1, 4):
             train_event = Event(
                 time=min_time + pd.DateOffset(years=i),
-                priority=2,
+                priority=1,
                 event_type='TRAIN',
                 payload={},
             )
@@ -51,6 +51,19 @@ def schedule_trainings(experiment: str, simulator: Simulator, min_time: pd.Times
         ActivationPatientsMonitor(
             simulator=simulator,
             activation_threshold=50,
+        )
+    elif experiment == 'RetrainAfterPerformanceDrift':
+        PerformanceDriftMonitor(
+            simulator=simulator,
+            bootstrap_months=3,
+            inference_interval_days=1,
+            retraining_delay_days=1,
+            metric_name='rmse',
+            degradation_threshold=0.20,
+            degraded_dt_fraction_threshold=0.30,
+            min_comparable_dts=5,
+            threshold_mode='relative',
+            higher_is_worse=True,
         )
 
 #@track_emissions
@@ -91,7 +104,7 @@ if __name__ == "__main__":
     config = LearningConfig()
     data_folder = 'T1DiabetesGranada/split'
     seeds = [0]
-    experiments = ['RetrainEachNDTsActivated', 'RetrainAfterTime'] # TODO add all the experiments
+    experiments = ['RetrainEachNDTsActivated', 'RetrainAfterTime'] # Add 'RetrainAfterPerformanceDrift' to enable drift-driven retraining
 
     for experiment in experiments:
         Path(f'{config.data_export_path}/{experiment}').mkdir(parents=True, exist_ok=True)

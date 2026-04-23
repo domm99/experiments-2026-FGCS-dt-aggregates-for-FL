@@ -31,6 +31,8 @@ class SimulationState:
     def __init__(self):
         self.active_patients = set()
         self.local_dts = {}
+        self.last_training_time = None
+        self.last_inference_results = []
 
 class Monitor(ABC):
 
@@ -43,6 +45,9 @@ class Monitor(ABC):
 
     def on_finish(self) -> None:
         """Called when the simulation ends"""
+
+    def on_event(self, event: Event) -> None:
+        """Called after an event has been processed"""
 
     def update(self):
         """Called at each simulation step"""
@@ -68,10 +73,28 @@ class Simulator:
         self._experiment = experiment
 
     def schedule_event(self, event: Event) -> None:
+        if event.time > self._ending_time:
+            return
         self._queue.push(event)
 
     def add_monitor(self, monitor) -> None:
         self._monitors.append(monitor)
+
+    @property
+    def state(self) -> SimulationState:
+        return self._state
+
+    @property
+    def dt_aggregate(self) -> DTAggregate:
+        return self._dt_aggregate
+
+    @property
+    def config(self) -> LearningConfig:
+        return self._config
+
+    @property
+    def ending_time(self) -> pd.Timestamp:
+        return self._ending_time
 
     def __dispatch(self, event: Event):
         self._handlers[event.event_type](event)
@@ -87,6 +110,7 @@ class Simulator:
             self.__dispatch(event)
 
             for monitor in self._monitors:
+                monitor.on_event(event)
                 monitor.update()
 
         for monitor in self._monitors:
@@ -126,12 +150,27 @@ class Simulator:
         current_time = event.time
         print(f'========= Training at:{current_time} =========')
         self._dt_aggregate.update_data_from_dts(current_time)
+        if self._dt_aggregate.trainable_dt_count == 0:
+            print('========= Training skipped: no trainable active DTs =========')
+            return
         self._dt_aggregate.train(current_time)
         self._dt_aggregate.notify_new_model()
+        self._state.last_training_time = current_time
+        self._state.last_inference_results = []
 
     def __handle_inference(self, event: Event):
         current_time = event.time
         print(f'========= Inference at:{current_time} =========')
         last_training_time = event.payload['last_training_time']
+        if self._state.last_training_time is None:
+            print('========= Inference skipped: no completed training yet =========')
+            return
+        if last_training_time != self._state.last_training_time:
+            print('========= Inference skipped: stale inference event =========')
+            return
+        inference_results = []
         for local_dt in self._dt_aggregate.active_dts:
-            local_dt.inference(current_time, last_training_time)
+            metrics = local_dt.inference(current_time, last_training_time)
+            if metrics is not None:
+                inference_results.append(metrics)
+        self._state.last_inference_results = inference_results
