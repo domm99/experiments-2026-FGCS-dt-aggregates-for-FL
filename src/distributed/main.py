@@ -59,12 +59,13 @@ def schedule_trainings(experiment: str, simulator: Simulator, min_time: pd.Times
             bootstrap_months=9,
             inference_interval_days=1,
             retraining_delay_days=1,
-            metric_name='rmse',
-            degradation_threshold=0.20,
-            degraded_dt_fraction_threshold=0.30,
+            metric_name='accuracy',
+            degradation_threshold=0.0,
+            degraded_dt_fraction_threshold=config.degraded_dt_fraction_threshold,
+            metric_floor=config.accuracy_threshold,
             min_comparable_dts=5,
             threshold_mode='relative',
-            higher_is_worse=True,
+            higher_is_worse=False,
         )
 
 #@track_emissions
@@ -103,9 +104,9 @@ def run_simulation(seed: int, experiment: str) -> None:
 if __name__ == "__main__":
 
     config = LearningConfig()
-    data_folder = 'T1DiabetesGranada/split'
+    data_folder = 'T1DiabetesGranada/split-labeled'
     seeds = [0]
-    experiments = ['RetrainEachNDTsActivated', 'RetrainAfterTime'] # Add 'RetrainAfterPerformanceDrift' to enable drift-driven retraining
+    experiments = ['RetrainEachNDTsActivated', 'RetrainAfterTime', 'RetrainAfterPerformanceDrift']
 
     for experiment in experiments:
         Path(f'{config.data_export_path}/{experiment}').mkdir(parents=True, exist_ok=True)

@@ -22,6 +22,8 @@ class LearningConfig:
     train_ratio: float = 0.8
     sequence_length: int = 12
     learning_rate: float = 1e-3
-    prediction_horizon: int = 3
+    label_column: str = 'target_any_within_t'
+    accuracy_threshold: float = 0.70
+    degraded_dt_fraction_threshold: float = 0.30
     data_export_path: str = 'data'
     device: torch.device = get_current_device()

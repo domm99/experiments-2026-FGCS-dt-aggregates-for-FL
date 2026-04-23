@@ -3,7 +3,15 @@ import torch
 import pandas as pd
 from collections import OrderedDict
 from src.distributed.LearningConfig import LearningConfig
-from src.distributed.utils import load_patient_series, load_test_patient_series, PatientSeries, ForecastLSTM, evaluate, create_test_loaders, normalize_series
+from src.distributed.utils import (
+    load_patient_series,
+    load_test_patient_series,
+    PatientSeries,
+    GlucoseClassifierLSTM,
+    evaluate,
+    create_test_loaders,
+    normalize_series,
+)
 
 class DT:
 
@@ -34,7 +42,7 @@ class DT:
     @model.setter
     def model(self, data: tuple[OrderedDict[str, torch.Tensor], float, float]):
         model, mean, std = data
-        fresh_model = ForecastLSTM(
+        fresh_model = GlucoseClassifierLSTM(
             hidden_size=self._config.hidden_size,
             num_layers=self._config.layers,
             dropout=self._config.dropout,
@@ -66,8 +74,8 @@ class DT:
             patient_id=self._mid,
             patient_dataframe=filtered_df,
             sequence_length=self._config.sequence_length,
-            prediction_horizon=self._config.prediction_horizon,
             train_ratio=self._config.train_ratio,
+            label_column=self._config.label_column,
         )
         return series
 
@@ -80,9 +88,8 @@ class DT:
             metrics = {
                 'status': 'skipped_no_model',
                 'num_points': 0,
-                'mse': float('nan'),
-                'mae': float('nan'),
-                'rmse': float('nan'),
+                'loss': float('nan'),
+                'accuracy': float('nan'),
             }
             self.__export_test_metrics(metrics, current_time)
             return metrics
@@ -91,13 +98,12 @@ class DT:
             metrics = {
                 'status': 'skipped_short_test_window',
                 'num_points': num_points,
-                'mse': float('nan'),
-                'mae': float('nan'),
-                'rmse': float('nan'),
+                'loss': float('nan'),
+                'accuracy': float('nan'),
             }
             self.__export_test_metrics(metrics, current_time)
             return metrics
-        metrics = evaluate(self._model, loader, self._config.device, self._last_mean, self._last_std)
+        metrics = evaluate(self._model, loader, self._config.device)
         metrics['status'] = 'evaluated'
         metrics['num_points'] = num_points
         self.__export_test_metrics(metrics, current_time)
@@ -116,7 +122,7 @@ class DT:
             patient_id=self._mid,
             patient_dataframe=filtered_df,
             sequence_length=self._config.sequence_length,
-            prediction_horizon=self._config.prediction_horizon,
+            label_column=self._config.label_column,
         )
         if series is None:
             return None, len(filtered_df)
@@ -124,7 +130,6 @@ class DT:
         loader = create_test_loaders(
             normalized_series,
             self._config.sequence_length,
-            self._config.prediction_horizon,
             self._config.stride,
             self._config.batch_size)
         return loader, len(series.values)

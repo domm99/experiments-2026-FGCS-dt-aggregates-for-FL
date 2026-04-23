@@ -50,6 +50,7 @@ class PerformanceDriftMonitor(Monitor):
         metric_name: str,
         degradation_threshold: float,
         degraded_dt_fraction_threshold: float,
+        metric_floor: float | None = None,
         min_comparable_dts: int = 1,
         threshold_mode: str = 'relative',
         higher_is_worse: bool = True,
@@ -63,6 +64,7 @@ class PerformanceDriftMonitor(Monitor):
         self._metric_name = metric_name
         self._degradation_threshold = degradation_threshold
         self._degraded_dt_fraction_threshold = degraded_dt_fraction_threshold
+        self._metric_floor = metric_floor
         self._min_comparable_dts = min_comparable_dts
         self._threshold_mode = threshold_mode
         self._higher_is_worse = higher_is_worse
@@ -97,18 +99,26 @@ class PerformanceDriftMonitor(Monitor):
         if self._simulator.state.last_training_time != last_training_time:
             return
 
-        comparable_results = []
+        evaluated_results = []
         for result in self._simulator.state.last_inference_results:
             if result.get('status') != 'evaluated':
                 continue
             metric_value = result.get(self._metric_name)
             if metric_value is None or pd.isna(metric_value):
                 continue
-            dt_id = result['dt_id']
-            if dt_id not in self._baseline_metrics:
-                self._baseline_metrics[dt_id] = float(metric_value)
-                continue
-            comparable_results.append(result)
+            evaluated_results.append(result)
+
+        if self._metric_floor is not None:
+            comparable_results = evaluated_results
+        else:
+            comparable_results = []
+            for result in evaluated_results:
+                dt_id = result['dt_id']
+                metric_value = float(result[self._metric_name])
+                if dt_id not in self._baseline_metrics:
+                    self._baseline_metrics[dt_id] = metric_value
+                    continue
+                comparable_results.append(result)
 
         degraded_count = sum(
             1 for result in comparable_results
@@ -120,9 +130,10 @@ class PerformanceDriftMonitor(Monitor):
             degraded_fraction = degraded_count / comparable_count
             if degraded_fraction >= self._degraded_dt_fraction_threshold and not self._training_pending:
                 self._training_pending = True
+                reason = 'low_accuracy' if self._metric_floor is not None else 'performance_drift'
                 self._schedule_train(
                     event.time + pd.DateOffset(days=self._retraining_delay_days),
-                    reason='performance_drift',
+                    reason=reason,
                 )
 
         self._schedule_inference(
@@ -151,6 +162,11 @@ class PerformanceDriftMonitor(Monitor):
         )
 
     def _is_degraded(self, dt_id: str, current_metric: float) -> bool:
+        if self._metric_floor is not None:
+            if self._higher_is_worse:
+                return current_metric > self._metric_floor
+            return current_metric < self._metric_floor
+
         baseline_metric = self._baseline_metrics[dt_id]
         if self._higher_is_worse:
             delta = current_metric - baseline_metric
