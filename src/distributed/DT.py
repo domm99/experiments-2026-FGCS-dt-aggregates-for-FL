@@ -90,6 +90,9 @@ class DT:
                 'num_points': 0,
                 'loss': float('nan'),
                 'accuracy': float('nan'),
+                'precision': float('nan'),
+                'recall': float('nan'),
+                'f1_score': float('nan'),
             }
             self.__export_test_metrics(metrics, current_time)
             return metrics
@@ -100,6 +103,9 @@ class DT:
                 'num_points': num_points,
                 'loss': float('nan'),
                 'accuracy': float('nan'),
+                'precision': float('nan'),
+                'recall': float('nan'),
+                'f1_score': float('nan'),
             }
             self.__export_test_metrics(metrics, current_time)
             return metrics

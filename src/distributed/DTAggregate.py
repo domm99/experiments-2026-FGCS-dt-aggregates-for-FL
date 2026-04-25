@@ -6,12 +6,14 @@ from src.distributed.LearningConfig import LearningConfig
 from src.distributed.utils import (
     CLASS_NAMES,
     GlucoseClassifierLSTM,
+    classification_metrics_from_confusion_matrix,
     compute_class_weights,
     compute_train_stats,
     cross_entropy_batch,
     normalize_series,
     create_train_val_loaders,
     evaluate,
+    update_confusion_matrix,
 )
 
 class DTAggregate:
@@ -113,8 +115,7 @@ class DTAggregate:
             self._model.train()
             train_loss_sum = 0.0
             train_loss_normalization = 0.0
-            train_correct = 0
-            total_samples = 0
+            train_confusion_matrix = torch.zeros((len(CLASS_NAMES), len(CLASS_NAMES)), dtype=torch.long)
             for x, y in train_loader:
                 x = x.to(self._device)
                 y = y.to(self._device)
@@ -125,26 +126,33 @@ class DTAggregate:
                 loss.backward()
                 optimizer.step()
 
-                batch_size = y.size(0)
                 train_loss_sum += loss_sum
                 train_loss_normalization += loss_normalization
-                train_correct += (logits.argmax(dim=1) == y).sum().item()
-                total_samples += batch_size
+                predictions = logits.argmax(dim=1)
+                update_confusion_matrix(train_confusion_matrix, y, predictions)
 
             val_metrics = evaluate(self._model, val_loader, self._device, class_weights=class_weights)
+            train_metrics = classification_metrics_from_confusion_matrix(train_confusion_matrix)
 
             epoch_log = {
                 "epoch": epoch,
                 "train_loss": train_loss_sum / max(train_loss_normalization, 1.0),
-                "train_accuracy": train_correct / max(total_samples, 1),
+                "train_accuracy": train_metrics["accuracy"],
+                "train_precision": train_metrics["precision"],
+                "train_recall": train_metrics["recall"],
+                "train_f1_score": train_metrics["f1_score"],
                 "val_loss": val_metrics["loss"],
                 "val_accuracy": val_metrics["accuracy"],
+                "val_precision": val_metrics["precision"],
+                "val_recall": val_metrics["recall"],
+                "val_f1_score": val_metrics["f1_score"],
             }
             history.append(epoch_log)
             print(
                 f"Epoch {epoch:02d} | "
                 f"train_acc={epoch_log['train_accuracy']:.4f} | "
                 f"val_acc={epoch_log['val_accuracy']:.4f} | "
+                f"val_f1={epoch_log['val_f1_score']:.4f} | "
                 f"val_loss={epoch_log['val_loss']:.4f}"
             )
 

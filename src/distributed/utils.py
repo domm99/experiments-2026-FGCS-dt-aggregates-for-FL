@@ -75,17 +75,18 @@ class GlucoseClassifierLSTM(nn.Module):
     def __init__(self, hidden_size: int, num_layers: int, dropout: float) -> None:
         super().__init__()
         lstm_dropout = dropout if num_layers > 1 else 0.0
-        self.lstm = nn.LSTM(
+        self.rnn = nn.RNN(
             input_size=1,
             hidden_size=hidden_size,
-            num_layers=num_layers,
+            num_layers=1,
             batch_first=True,
-            dropout=lstm_dropout,
+            nonlinearity="tanh",
         )
+        self.head = nn.Linear(hidden_size, len(CLASS_NAMES))
         self.head = nn.Linear(hidden_size, len(CLASS_NAMES))
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        output, _ = self.lstm(x)
+        output, _ = self.rnn(x)
         return self.head(output[:, -1, :])
 
 
@@ -312,6 +313,61 @@ def cross_entropy_batch(
     return loss, float(loss_sum.item()), normalization
 
 
+def update_confusion_matrix(
+    confusion_matrix: torch.Tensor,
+    targets: torch.Tensor,
+    predictions: torch.Tensor,
+) -> None:
+    num_classes = confusion_matrix.size(0)
+    encoded = (
+        targets.detach().to(dtype=torch.int64, device="cpu") * num_classes
+        + predictions.detach().to(dtype=torch.int64, device="cpu")
+    )
+    batch_confusion = torch.bincount(encoded, minlength=num_classes * num_classes)
+    confusion_matrix += batch_confusion.reshape(num_classes, num_classes)
+
+
+def classification_metrics_from_confusion_matrix(confusion_matrix: torch.Tensor) -> dict[str, float]:
+    counts = confusion_matrix.to(dtype=torch.float64)
+    total = counts.sum()
+    if total.item() == 0:
+        return {
+            "accuracy": 0.0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1_score": 0.0,
+        }
+
+    true_positives = counts.diag()
+    actual_support = counts.sum(dim=1)
+    predicted_support = counts.sum(dim=0)
+
+    precision_per_class = torch.where(
+        predicted_support > 0,
+        true_positives / predicted_support,
+        torch.zeros_like(true_positives),
+    )
+    recall_per_class = torch.where(
+        actual_support > 0,
+        true_positives / actual_support,
+        torch.zeros_like(true_positives),
+    )
+    f1_denominator = precision_per_class + recall_per_class
+    f1_per_class = torch.where(
+        f1_denominator > 0,
+        2.0 * precision_per_class * recall_per_class / f1_denominator,
+        torch.zeros_like(f1_denominator),
+    )
+
+    # Macro averages keep each class equally important despite imbalance.
+    return {
+        "accuracy": float(true_positives.sum().item() / total.item()),
+        "precision": float(precision_per_class.mean().item()),
+        "recall": float(recall_per_class.mean().item()),
+        "f1_score": float(f1_per_class.mean().item()),
+    }
+
+
 def evaluate(
     model: nn.Module,
     loader: DataLoader,
@@ -321,8 +377,7 @@ def evaluate(
     model.eval()
     total_loss = 0.0
     total_loss_normalization = 0.0
-    total_samples = 0
-    total_correct = 0
+    confusion_matrix = torch.zeros((len(CLASS_NAMES), len(CLASS_NAMES)), dtype=torch.long)
     loss_weights = class_weights.to(device) if class_weights is not None else None
 
     with torch.no_grad():
@@ -335,10 +390,10 @@ def evaluate(
 
             total_loss += loss_sum
             total_loss_normalization += loss_normalization
-            total_samples += y.size(0)
-            total_correct += (predictions == y).sum().item()
+            update_confusion_matrix(confusion_matrix, y, predictions)
 
+    metrics = classification_metrics_from_confusion_matrix(confusion_matrix)
     return {
         "loss": total_loss / max(total_loss_normalization, 1.0),
-        "accuracy": total_correct / max(total_samples, 1),
+        **metrics,
     }
