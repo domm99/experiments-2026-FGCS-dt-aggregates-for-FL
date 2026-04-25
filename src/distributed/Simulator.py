@@ -69,10 +69,11 @@ class Simulator:
         self._monitors = []
         self._experiment = experiment
 
-    def schedule_event(self, event: Event) -> None:
+    def schedule_event(self, event: Event) -> bool:
         if event.time > self._ending_time:
-            return
+            return False
         self._queue.push(event)
+        return True
 
     def add_monitor(self, monitor) -> None:
         self._monitors.append(monitor)
@@ -92,6 +93,10 @@ class Simulator:
     @property
     def ending_time(self) -> pd.Timestamp:
         return self._ending_time
+
+    @property
+    def experiment(self) -> str:
+        return self._experiment
 
     def __dispatch(self, event: Event):
         self._handlers[event.event_type](event)

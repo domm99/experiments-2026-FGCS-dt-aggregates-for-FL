@@ -23,7 +23,15 @@ class LearningConfig:
     sequence_length: int = 12
     learning_rate: float = 1e-3
     label_column: str = 'target_any_within_t'
-    accuracy_threshold: float = 0.70
-    degraded_dt_fraction_threshold: float = 0.30
+    drift_bootstrap_months: int = 3
+    drift_inference_interval_days: int = 3
+    drift_retraining_delay_days: int = 1
+    drift_metric_name: str = 'f1_score'
+    drift_degradation_threshold: float = 0.1
+    drift_metric_floor: float | None = None
+    drift_min_comparable_dts: int = 5
+    drift_threshold_mode: str = 'relative'
+    drift_higher_is_worse: bool = False
+    degraded_dt_fraction_threshold: float = 0.2
     data_export_path: str = 'data'
     device: torch.device = get_current_device()

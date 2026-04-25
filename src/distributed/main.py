@@ -31,41 +31,46 @@ def load_patients(data_folder: str) -> tuple[list[dict], pd.Timestamp, pd.Timest
                 global_max = max_time
     return patients, global_min, global_max
 
-def schedule_trainings(experiment: str, simulator: Simulator, min_time: pd.Timestamp) -> None:
+def schedule_trainings(experiment: str, simulator: Simulator, min_time: pd.Timestamp, max_time: pd.Timestamp) -> None:
     if experiment == 'RetrainAfterTime':
-        for i in range(1, 4):
+        current_time = min_time
+        i = 0
+        months_step = 3
+        while current_time < max_time:
             train_event = Event(
-                time=min_time + pd.DateOffset(years=i),
+                time=min_time + pd.DateOffset(months=months_step*i),
                 priority=1,
                 event_type='TRAIN',
                 payload={},
             )
             simulator.schedule_event(train_event)
             test_event = Event(
-                time=min_time + pd.DateOffset(years=(i+1)) - pd.DateOffset(days=1),
+                time=min_time + pd.DateOffset(months=((months_step*i)+1)) - pd.DateOffset(days=1),
                 priority=2,
                 event_type='INFERENCE',
-                payload={'last_training_time': min_time + pd.DateOffset(years=i)},
+                payload={'last_training_time': min_time + pd.DateOffset(months=months_step*i)},
             )
             simulator.schedule_event(test_event)
+            current_time = current_time + pd.DateOffset(months=months_step)
+            i += 1
     elif experiment == 'RetrainEachNDTsActivated':
         ActivationPatientsMonitor(
             simulator=simulator,
-            activation_threshold=50,
+            activation_threshold=20,
         )
     elif experiment == 'RetrainAfterPerformanceDrift':
         PerformanceDriftMonitor(
             simulator=simulator,
-            bootstrap_months=9,
-            inference_interval_days=1,
-            retraining_delay_days=1,
-            metric_name='accuracy',
-            degradation_threshold=0.0,
+            bootstrap_months=config.drift_bootstrap_months,
+            inference_interval_days=config.drift_inference_interval_days,
+            retraining_delay_days=config.drift_retraining_delay_days,
+            metric_name=config.drift_metric_name,
+            degradation_threshold=config.drift_degradation_threshold,
             degraded_dt_fraction_threshold=config.degraded_dt_fraction_threshold,
-            metric_floor=config.accuracy_threshold,
-            min_comparable_dts=5,
-            threshold_mode='relative',
-            higher_is_worse=False,
+            metric_floor=config.drift_metric_floor,
+            min_comparable_dts=config.drift_min_comparable_dts,
+            threshold_mode=config.drift_threshold_mode,
+            higher_is_worse=config.drift_higher_is_worse,
         )
 
 #@track_emissions
@@ -97,7 +102,7 @@ def run_simulation(seed: int, experiment: str) -> None:
         simulator.schedule_event(event_inactive)
 
     # Schedule trainings and inferences
-    schedule_trainings(experiment, simulator, min_time)
+    schedule_trainings(experiment, simulator, min_time, max_time)
 
     simulator.start()
 
@@ -106,7 +111,7 @@ if __name__ == "__main__":
     config = LearningConfig()
     data_folder = 'T1DiabetesGranada/split-labeled'
     seeds = [0]
-    experiments = ['RetrainEachNDTsActivated', 'RetrainAfterTime', 'RetrainAfterPerformanceDrift']
+    experiments = ['RetrainAfterPerformanceDrift'] #['RetrainEachNDTsActivated', 'RetrainAfterTime', 'RetrainAfterPerformanceDrift']
 
     for experiment in experiments:
         Path(f'{config.data_export_path}/{experiment}').mkdir(parents=True, exist_ok=True)

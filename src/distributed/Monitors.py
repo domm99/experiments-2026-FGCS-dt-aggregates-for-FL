@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pandas as pd
 from src.distributed.Simulator import Event, Monitor, Simulator
 
@@ -71,6 +73,7 @@ class PerformanceDriftMonitor(Monitor):
         self._train_priority = train_priority
         self._inference_priority = inference_priority
         self._baseline_metrics: dict[str, float] = {}
+        self._baseline_timestamps: dict[str, pd.Timestamp] = {}
         self._training_pending = False
 
     def on_start(self) -> None:
@@ -85,6 +88,7 @@ class PerformanceDriftMonitor(Monitor):
                 self._training_pending = False
                 return
             self._baseline_metrics = {}
+            self._baseline_timestamps = {}
             self._training_pending = False
             self._schedule_inference(
                 event.time + pd.DateOffset(days=self._inference_interval_days),
@@ -96,6 +100,7 @@ class PerformanceDriftMonitor(Monitor):
             return
 
         last_training_time = event.payload['last_training_time']
+        detection_time = event.time
         if self._simulator.state.last_training_time != last_training_time:
             return
 
@@ -117,32 +122,45 @@ class PerformanceDriftMonitor(Monitor):
                 metric_value = float(result[self._metric_name])
                 if dt_id not in self._baseline_metrics:
                     self._baseline_metrics[dt_id] = metric_value
+                    self._baseline_timestamps[dt_id] = detection_time
                     continue
                 comparable_results.append(result)
 
-        degraded_count = sum(
-            1 for result in comparable_results
+        degraded_results = [
+            result for result in comparable_results
             if self._is_degraded(result['dt_id'], float(result[self._metric_name]))
-        )
+        ]
+        degraded_count = len(degraded_results)
         comparable_count = len(comparable_results)
 
         if comparable_count >= self._min_comparable_dts:
             degraded_fraction = degraded_count / comparable_count
             if degraded_fraction >= self._degraded_dt_fraction_threshold and not self._training_pending:
-                self._training_pending = True
                 reason = 'low_accuracy' if self._metric_floor is not None else 'performance_drift'
-                self._schedule_train(
-                    event.time + pd.DateOffset(days=self._retraining_delay_days),
+                scheduled_training_time = detection_time + pd.DateOffset(days=self._retraining_delay_days)
+                train_event_scheduled = self._schedule_train(
+                    scheduled_training_time,
+                    reason=reason,
+                )
+                self._training_pending = train_event_scheduled
+                self._export_drift_event(
+                    last_training_time=last_training_time,
+                    detection_time=detection_time,
+                    scheduled_training_time=scheduled_training_time,
+                    train_event_scheduled=train_event_scheduled,
+                    comparable_results=comparable_results,
+                    degraded_results=degraded_results,
+                    degraded_fraction=degraded_fraction,
                     reason=reason,
                 )
 
         self._schedule_inference(
-            event.time + pd.DateOffset(days=self._inference_interval_days),
+            detection_time + pd.DateOffset(days=self._inference_interval_days),
             last_training_time,
         )
 
-    def _schedule_train(self, time: pd.Timestamp, reason: str) -> None:
-        self._simulator.schedule_event(
+    def _schedule_train(self, time: pd.Timestamp, reason: str) -> bool:
+        return self._simulator.schedule_event(
             Event(
                 time=time,
                 priority=self._train_priority,
@@ -151,8 +169,8 @@ class PerformanceDriftMonitor(Monitor):
             )
         )
 
-    def _schedule_inference(self, time: pd.Timestamp, last_training_time: pd.Timestamp) -> None:
-        self._simulator.schedule_event(
+    def _schedule_inference(self, time: pd.Timestamp, last_training_time: pd.Timestamp) -> bool:
+        return self._simulator.schedule_event(
             Event(
                 time=time,
                 priority=self._inference_priority,
@@ -160,6 +178,119 @@ class PerformanceDriftMonitor(Monitor):
                 payload={'last_training_time': last_training_time},
             )
         )
+
+    def _reference_metric(self, dt_id: str) -> float:
+        if self._metric_floor is not None:
+            return float(self._metric_floor)
+        return self._baseline_metrics[dt_id]
+
+    def _absolute_degradation(self, dt_id: str, current_metric: float) -> float:
+        reference_metric = self._reference_metric(dt_id)
+        if self._higher_is_worse:
+            return current_metric - reference_metric
+        return reference_metric - current_metric
+
+    def _relative_degradation(self, dt_id: str, current_metric: float) -> float:
+        reference_metric = self._reference_metric(dt_id)
+        degradation = self._absolute_degradation(dt_id, current_metric)
+        reference_scale = abs(reference_metric)
+        if reference_scale == 0:
+            return 1.0 if degradation > 0 else 0.0
+        return degradation / reference_scale
+
+    def _mean_or_nan(self, values: list[float]) -> float:
+        if not values:
+            return float('nan')
+        return float(sum(values) / len(values))
+
+    def _days_between(self, start_time: pd.Timestamp, end_time: pd.Timestamp) -> float:
+        delta = end_time - start_time
+        return float(delta.total_seconds() / 86400.0)
+
+    def _summarize_results(
+        self,
+        results: list[dict],
+        reference_time: pd.Timestamp,
+    ) -> dict[str, float]:
+        current_metrics: list[float] = []
+        reference_metrics: list[float] = []
+        absolute_degradations: list[float] = []
+        relative_degradations: list[float] = []
+        reference_ages_days: list[float] = []
+
+        for result in results:
+            dt_id = result['dt_id']
+            current_metric = float(result[self._metric_name])
+            current_metrics.append(current_metric)
+            reference_metrics.append(self._reference_metric(dt_id))
+            absolute_degradations.append(self._absolute_degradation(dt_id, current_metric))
+            relative_degradations.append(self._relative_degradation(dt_id, current_metric))
+
+            baseline_time = self._baseline_timestamps.get(dt_id)
+            if baseline_time is not None:
+                reference_ages_days.append(self._days_between(baseline_time, reference_time))
+
+        return {
+            'mean_current_metric': self._mean_or_nan(current_metrics),
+            'mean_reference_metric': self._mean_or_nan(reference_metrics),
+            'mean_absolute_degradation': self._mean_or_nan(absolute_degradations),
+            'mean_relative_degradation': self._mean_or_nan(relative_degradations),
+            'mean_reference_age_days': self._mean_or_nan(reference_ages_days),
+            'max_reference_age_days': max(reference_ages_days) if reference_ages_days else float('nan'),
+        }
+
+    def _export_drift_event(
+        self,
+        last_training_time: pd.Timestamp,
+        detection_time: pd.Timestamp,
+        scheduled_training_time: pd.Timestamp,
+        train_event_scheduled: bool,
+        comparable_results: list[dict],
+        degraded_results: list[dict],
+        degraded_fraction: float,
+        reason: str,
+    ) -> None:
+        comparable_summary = self._summarize_results(comparable_results, detection_time)
+        degraded_summary = self._summarize_results(degraded_results, detection_time)
+        metrics = {
+            'reason': reason,
+            'metric_name': self._metric_name,
+            'threshold_mode': self._threshold_mode,
+            'metric_floor': self._metric_floor,
+            'degradation_threshold': self._degradation_threshold,
+            'degraded_dt_fraction_threshold': self._degraded_dt_fraction_threshold,
+            'higher_is_worse': self._higher_is_worse,
+            'last_training_time': last_training_time,
+            'detection_time': detection_time,
+            'scheduled_training_time': scheduled_training_time,
+            'train_event_scheduled': train_event_scheduled,
+            'detection_latency_days': self._days_between(last_training_time, detection_time),
+            'schedule_latency_days': self._days_between(detection_time, scheduled_training_time),
+            'end_to_end_latency_days': self._days_between(last_training_time, scheduled_training_time),
+            'comparable_dt_count': len(comparable_results),
+            'degraded_dt_count': len(degraded_results),
+            'degraded_fraction': degraded_fraction,
+            'degraded_dt_ids': '|'.join(sorted(result['dt_id'] for result in degraded_results)),
+            'simulation_end_time': self._simulator.ending_time,
+            **comparable_summary,
+            'mean_degraded_current_metric': degraded_summary['mean_current_metric'],
+            'mean_degraded_reference_metric': degraded_summary['mean_reference_metric'],
+            'mean_degraded_absolute_degradation': degraded_summary['mean_absolute_degradation'],
+            'mean_degraded_relative_degradation': degraded_summary['mean_relative_degradation'],
+            'mean_degraded_reference_age_days': degraded_summary['mean_reference_age_days'],
+            'max_degraded_reference_age_days': degraded_summary['max_reference_age_days'],
+        }
+
+        output_dir = Path(self._simulator.config.data_export_path) / self._simulator.experiment
+        output_dir.mkdir(parents=True, exist_ok=True)
+        output_path = output_dir / f'drift_events-seed_{self._simulator.seed}.csv'
+
+        if output_path.exists():
+            metrics_df = pd.read_csv(output_path)
+            metrics_df = pd.concat([metrics_df, pd.DataFrame([metrics])], ignore_index=True)
+        else:
+            metrics_df = pd.DataFrame([metrics])
+        metrics_df.to_csv(output_path, index=False)
 
     def _is_degraded(self, dt_id: str, current_metric: float) -> bool:
         if self._metric_floor is not None:
