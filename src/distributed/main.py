@@ -5,7 +5,7 @@ from codecarbon import track_emissions
 from src.distributed.utils import seed_everything
 from src.distributed.Simulator import Simulator, Event
 from src.distributed.LearningConfig import LearningConfig
-from src.distributed.Monitors import ActivationPatientsMonitor, PerformanceDriftMonitor
+from src.distributed.Monitors import ActivationPatientsMonitor, PerformanceDriftMonitor, PeriodicInferenceMonitor
 
 
 def load_patients(data_folder: str) -> tuple[list[dict], pd.Timestamp, pd.Timestamp]:
@@ -33,6 +33,10 @@ def load_patients(data_folder: str) -> tuple[list[dict], pd.Timestamp, pd.Timest
 
 def schedule_trainings(experiment: str, simulator: Simulator, min_time: pd.Timestamp, max_time: pd.Timestamp) -> None:
     if experiment == 'RetrainAfterTime':
+        PeriodicInferenceMonitor(
+            simulator=simulator,
+            inference_interval_days=simulator.config.drift_inference_interval_days,
+        )
         current_time = min_time
         i = 0
         months_step = 3
@@ -44,19 +48,16 @@ def schedule_trainings(experiment: str, simulator: Simulator, min_time: pd.Times
                 payload={},
             )
             simulator.schedule_event(train_event)
-            test_event = Event(
-                time=min_time + pd.DateOffset(months=((months_step*i)+1)) - pd.DateOffset(days=1),
-                priority=2,
-                event_type='INFERENCE',
-                payload={'last_training_time': min_time + pd.DateOffset(months=months_step*i)},
-            )
-            simulator.schedule_event(test_event)
             current_time = current_time + pd.DateOffset(months=months_step)
             i += 1
     elif experiment == 'RetrainEachNDTsActivated':
         ActivationPatientsMonitor(
             simulator=simulator,
             activation_threshold=20,
+        )
+        PeriodicInferenceMonitor(
+            simulator=simulator,
+            inference_interval_days=simulator.config.drift_inference_interval_days,
         )
     elif experiment == 'RetrainAfterPerformanceDrift':
         PerformanceDriftMonitor(
